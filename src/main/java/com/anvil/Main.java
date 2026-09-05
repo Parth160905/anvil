@@ -14,27 +14,30 @@ public class Main {
 
             if (args.length > 0 && args[0].equals("recover")) {
                 System.out.println("--- Recovery check ---");
-                System.out.println("k1 = " + db.getAsString("k1"));
-                System.out.println("k2 = " + db.getAsString("k2"));
-                System.out.println("k3 = " + db.getAsString("k3"));
-                System.out.println("k4 = " + db.getAsString("k4"));
-                System.out.println("k5 = " + db.getAsString("k5"));
+                for (String k : new String[]{"k1","k2","k3","k4","k5","k6","k7","k8","stale"}) {
+                    System.out.println(k + " = " + db.getAsString(k));
+                }
                 System.out.println("SSTables on disk: " + db.sstableCount());
                 return;
             }
 
-            System.out.println("--- Writing 5 keys (flush threshold is 4) ---");
+            System.out.println("--- Writing 8 keys, deleting one, to force flush + compaction ---");
             db.put("k1", "value-one");
             db.put("k2", "value-two");
-            db.put("k3", "value-three");
-            db.put("k4", "value-four");  // this write should trigger a flush
-            db.put("k5", "value-five");  // stays in memtable
+            db.put("stale", "will be deleted");
+            db.put("k3", "value-three");   // flush #1 (4 entries) -> triggers compaction check (1 table, no compact yet)
+            db.delete("stale");
+            db.put("k4", "value-four");
+            db.put("k5", "value-five");
+            db.put("k6", "value-six");     // flush #2 (4 entries) -> now 2 tables -> COMPACTION fires
+            db.put("k7", "value-seven");
+            db.put("k8", "value-eight");
 
-            System.out.println("k1 = " + db.getAsString("k1") + " (from SSTable)");
-            System.out.println("k5 = " + db.getAsString("k5") + " (from memtable)");
+            System.out.println("k1 = " + db.getAsString("k1"));
+            System.out.println("stale = " + db.getAsString("stale") + " (expect null, deleted)");
             System.out.println("SSTables on disk: " + db.sstableCount());
 
-            System.out.println("Run again with argument recover to prove SSTable + memtable data both survive a fresh process.");
+            System.out.println("Run again with argument recover to confirm everything survives after compaction.");
         }
     }
 }

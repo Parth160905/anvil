@@ -1,6 +1,7 @@
 package com.anvil.core;
 
 import com.anvil.memtable.MemTable;
+import com.anvil.sstable.Compactor;
 import com.anvil.sstable.SSTable;
 import com.anvil.wal.WriteAheadLog;
 
@@ -9,22 +10,16 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
-/**
- * Phase 2: adds SSTable flushing on top of Phase 1's WAL + MemTable.
- * Once the memtable exceeds MEMTABLE_FLUSH_THRESHOLD entries, it's flushed
- * to an immutable sorted file on disk and the WAL is truncated (that data
- * is now durable on disk, not just in the log). Reads check the memtable
- * first, then SSTables newest-to-oldest.
- */
 public class Anvil implements AutoCloseable {
 
-    private static final int MEMTABLE_FLUSH_THRESHOLD = 4; // small on purpose, so you can see flushes happen
+    private static final int MEMTABLE_FLUSH_THRESHOLD = 4;
+    private static final int COMPACTION_TRIGGER_COUNT = 2; // compact once we hit this many SSTables
 
     private final String walPath;
     private final File dataDir;
     private MemTable memTable;
     private WriteAheadLog wal;
-    private final List<SSTable> sstables = new ArrayList<>(); // newest last
+    private final List<SSTable> sstables = new ArrayList<>(); // oldest first
     private int sstableCounter = 0;
 
     public Anvil(String walPath, String dataDirPath) throws IOException {
@@ -44,7 +39,10 @@ public class Anvil implements AutoCloseable {
         Arrays.sort(files, Comparator.comparing(File::getName));
         for (File f : files) {
             sstables.add(new SSTable(f));
-            sstableCounter++;
+        }
+        for (File f : files) {
+            int n = Integer.parseInt(f.getName().replaceAll("\\D", ""));
+            sstableCounter = Math.max(sstableCounter, n + 1);
         }
     }
 
@@ -83,7 +81,6 @@ public class Anvil implements AutoCloseable {
         if (fromMemtable != null) return fromMemtable;
         if (memTable.isTombstone(key)) return null;
 
-        // check SSTables newest to oldest
         for (int i = sstables.size() - 1; i >= 0; i--) {
             byte[] result = sstables.get(i).get(key);
             if (result == SSTable.TOMBSTONE_MARKER) return null;
@@ -105,7 +102,6 @@ public class Anvil implements AutoCloseable {
         return sstables.size();
     }
 
-    /** Flushes the memtable to a new SSTable if it's grown past the threshold. */
     private void maybeFlush() throws IOException {
         if (memTable.size() < MEMTABLE_FLUSH_THRESHOLD) return;
 
@@ -121,14 +117,28 @@ public class Anvil implements AutoCloseable {
         File sstFile = new File(dataDir, String.format("sstable-%04d.db", sstableCounter++));
         SSTable.write(sstFile, sorted, tombstones);
         sstables.add(new SSTable(sstFile));
-
         System.out.println("[flush] wrote " + sstFile.getName() + " with " + sorted.size() + " entries");
 
-        // reset memtable + WAL: that data is now durable on disk
         memTable = new MemTable();
         wal.close();
         new File(walPath).delete();
         wal = new WriteAheadLog(walPath);
+
+        maybeCompact();
+    }
+
+    private void maybeCompact() throws IOException {
+        if (sstables.size() < COMPACTION_TRIGGER_COUNT) return;
+
+        List<SSTable> toMerge = new ArrayList<>(sstables); // oldest first, as stored
+        File compactedFile = new File(dataDir, String.format("sstable-%04d.db", sstableCounter++));
+        SSTable merged = Compactor.compact(toMerge, compactedFile);
+
+        for (SSTable old : toMerge) {
+            old.getFile().delete();
+        }
+        sstables.clear();
+        sstables.add(merged);
     }
 
     @Override
