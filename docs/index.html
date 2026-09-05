@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>anvil — embedded key-value storage engine</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #c9d1d9; --heading: #f0f6fc; --accent: #58a6ff;
+    --mono-bg: #010409;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 60px 24px 100px; }
+  h1 { color: var(--heading); font-size: 2.4em; margin-bottom: 4px; }
+  .tagline { color: #8b949e; font-size: 1.1em; margin-bottom: 32px; }
+  h2 {
+    color: var(--heading); margin-top: 56px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--border); font-size: 1.5em;
+  }
+  p { margin: 16px 0; }
+  code {
+    background: var(--mono-bg); border: 1px solid var(--border);
+    padding: 2px 6px; border-radius: 4px; font-size: 0.9em;
+    font-family: "SF Mono", Menlo, monospace; color: #79c0ff;
+  }
+  pre {
+    background: var(--mono-bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px; overflow-x: auto;
+  }
+  pre code { background: none; border: none; padding: 0; color: var(--text); }
+  .mermaid { background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 24px; text-align: center; }
+  table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+  th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+  th { background: var(--card); color: var(--heading); }
+  .badges { margin: 20px 0; }
+  .badges a {
+    display: inline-block; background: var(--card); border: 1px solid var(--border);
+    color: var(--accent); padding: 8px 18px; border-radius: 6px;
+    text-decoration: none; margin-right: 10px; font-weight: 600;
+  }
+  .badges a:hover { border-color: var(--accent); }
+  .note {
+    background: rgba(88,166,255,0.08); border-left: 3px solid var(--accent);
+    padding: 12px 18px; border-radius: 4px; margin: 20px 0;
+  }
+  ul { padding-left: 22px; }
+  li { margin: 8px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>anvil</h1>
+  <p class="tagline">An embedded, LSM-tree-based key-value storage engine, written in Java.</p>
+
+  <div class="badges">
+    <a href="https://github.com/Parth160905/Anvil">View source on GitHub &rarr;</a>
+  </div>
+
+  <p>The kind of engine that sits <em>underneath</em> a database, not one with a query language on top. No server, no SQL: you embed it as a library and call <code>put(key, value)</code> / <code>get(key)</code> / <code>delete(key)</code> directly, the same way RocksDB or LevelDB get embedded inside larger systems.</p>
+
+  <p>Built in five phases, each independently verified and committed: durable writes, disk-backed storage, compaction, thread-safe concurrent access, and JMH-benchmarked performance.</p>
+
+  <h2>Architecture</h2>
+  <div class="mermaid">
+flowchart TD
+    Client(["Client: put / get / delete"])
+    Client -->|put/delete| WAL["Write-Ahead Log<br/>fsync before ack"]
+    WAL --> MemTable["MemTable<br/>ConcurrentSkipListMap"]
+    MemTable -->|"size >= threshold"| Flush["Flush"]
+    Flush --> NewSST["new sstable-NNNN.db"]
+    Flush -.clears.-> MemTable
+    Flush -.truncates.-> WAL
+    NewSST --> CompactCheck{"2+ SSTables?"}
+    CompactCheck -->|yes| Compactor["Compactor<br/>merge + drop tombstones"]
+    Compactor --> MergedSST["single merged SSTable"]
+    CompactCheck -->|no| Idle["wait for next flush"]
+    Client -->|get| ReadMem{"key in MemTable?"}
+    ReadMem -->|yes| ReturnMem["return value / null if tombstoned"]
+    ReadMem -->|no| ReadSST["scan SSTables newest to oldest"]
+    ReadSST --> ReturnSST["return first match / null"]
+  </div>
+
+  <p><strong>Write path:</strong> every <code>put</code>/<code>delete</code> is appended to the WAL and <code>fsync</code>'d to disk before the call returns, then applied to an in-memory sorted MemTable. If the process crashes between those two steps, replaying the WAL on restart reconstructs the exact state.</p>
+
+  <p><strong>Compaction</strong> merges SSTables into one file once enough accumulate, keeping the newest version of each key and dropping tombstones entirely.</p>
+
+  <p><strong>Concurrency:</strong> ordinary reads/writes take a shared read lock; only flush/compaction takes an exclusive write lock.</p>
+
+  <h2>Benchmarks</h2>
+  <p>Measured with JMH (3 warmup + 5 measurement iterations, single fork):</p>
+  <table>
+    <tr><th>Benchmark</th><th>Throughput (ops/s)</th></tr>
+    <tr><td><code>writeThroughput</code></td><td>893.652 &plusmn; 202.206</td></tr>
+    <tr><td><code>readFromMemtable</code></td><td>2,091.694 &plusmn; 95.638</td></tr>
+    <tr><td><code>readFromSSTable</code></td><td>88,524.118 &plusmn; 502.499</td></tr>
+    <tr><td><code>readMixed</code></td><td>4,156.447 &plusmn; 6,174.625</td></tr>
+  </table>
+
+  <p><strong>Write throughput (~890 ops/s)</strong> is <code>fsync</code>-bound by design.</p>
+
+  <div class="note">
+    <strong>Read throughput varies ~40x depending on where a key physically lands.</strong> This is the honest cost of a linear-scan SSTable lookup, and the direct motivation for a bloom filter or sparse index.
+  </div>
+
+  <p>Also verified under concurrent load: 8 threads &times; 500 writes (4,000 total operations) completed in 625ms with zero errors and zero data mismatches.</p>
+
+  <h2>Running it</h2>
+  <pre><code>javac -d out $(find src/main/java -name "*.java")
+java -cp out com.anvil.Main
+java -cp out com.anvil.Main recover</code></pre>
+
+  <pre><code>mvn clean package -q
+java -jar target/benchmarks.jar</code></pre>
+
+  <h2>What's next</h2>
+  <ul>
+    <li><strong>Bloom filters</strong> — skip SSTables that provably don't contain a key</li>
+    <li><strong>Sparse index per SSTable</strong> — near-constant-time lookups</li>
+    <li><strong>Range scans</strong> — iterate sorted keys across MemTable + SSTables</li>
+    <li><strong>Leveled compaction</strong> — bound compaction cost as data grows</li>
+  </ul>
+
+  <p style="margin-top:60px; color:#8b949e;">Built by <a href="https://github.com/Parth160905" style="color:var(--accent)">Parth Arora</a> &middot; <a href="https://github.com/Parth160905/Anvil" style="color:var(--accent)">Full source on GitHub</a></p>
+
+</div>
+<script>mermaid.initialize({ startOnLoad: true, theme: 'dark' });</script>
+</body>
+</html>
