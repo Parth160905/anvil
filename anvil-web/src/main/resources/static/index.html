@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>anvil — live demo</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <h1>anvil <span class="tag">live demo</span></h1>
+  <p class="sub">A real embedded key-value engine running on this server. Every button below hits actual WAL + MemTable + SSTable code — <a href="https://github.com/Parth160905/Anvil" target="_blank">full source on GitHub</a>.</p>
+
+  <div class="stats" id="stats">memtable: — · sstables: —</div>
+
+  <div class="card">
+    <h2>Put</h2>
+    <div class="row">
+      <input id="putKey" placeholder="key">
+      <input id="putValue" placeholder="value">
+      <button onclick="doPut()">PUT</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Get</h2>
+    <div class="row">
+      <input id="getKey" placeholder="key">
+      <button onclick="doGet()">GET</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Delete</h2>
+    <div class="row">
+      <input id="delKey" placeholder="key">
+      <button onclick="doDelete()">DELETE</button>
+    </div>
+  </div>
+
+  <h2>Response</h2>
+  <pre id="output">Try a PUT first, then GET the same key to see it round-trip.</pre>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
