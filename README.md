@@ -1,6 +1,4 @@
-cd ~/Desktop/Anvil/anvil
 
-cat > README.md << 'EOF'
 # anvil
 
 An embedded, LSM-tree-based key-value storage engine written in Java — the kind of engine that sits *underneath* a database, not one with a query language on top. No server, no SQL: you embed it as a library and call `put(key, value)` / `get(key)` / `delete(key)` directly, the same way RocksDB or LevelDB get embedded inside larger systems.
