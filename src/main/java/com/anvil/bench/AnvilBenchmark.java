@@ -59,13 +59,11 @@ public class AnvilBenchmark {
 
     @Benchmark
     public void readFromMemtable(Blackhole bh) throws IOException {
-        // most recently written keys are still in the memtable
         bh.consume(db.get("preload-9999"));
     }
 
     @Benchmark
     public void readFromSSTable(Blackhole bh) throws IOException {
-        // early keys have been flushed to disk by now
         bh.consume(db.get("preload-0"));
     }
 
@@ -73,6 +71,11 @@ public class AnvilBenchmark {
     public void readMixed(Blackhole bh) throws IOException {
         int i = counter.getAndIncrement() % preloadedKeys.length;
         bh.consume(db.get(preloadedKeys[i]));
+    }
+
+    @Benchmark
+    public void readMissingKey(Blackhole bh) throws IOException {
+        bh.consume(db.get("this-key-was-never-written"));
     }
 
     private static void deleteRecursively(java.io.File f) {
