@@ -6,13 +6,18 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 @RestController
 @RequestMapping("/api")
 public class KvController {
 
     private final Anvil anvil;
+    private final AtomicLong totalGets = new AtomicLong();
+    private final AtomicLong noDiskGets = new AtomicLong();
 
     public KvController(Anvil anvil) {
         this.anvil = anvil;
@@ -30,11 +35,24 @@ public class KvController {
 
     @GetMapping("/kv/{key}")
     public ResponseEntity<?> get(@PathVariable String key) throws IOException {
-        String value = anvil.getAsString(key);
-        if (value == null) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("key", key, "error", "not found"));
+        Anvil.GetOutcome outcome = anvil.getWithDiagnostics(key);
+        totalGets.incrementAndGet();
+        if (outcome.sstablesReadFromDisk == 0) {
+            noDiskGets.incrementAndGet();
         }
-        return ResponseEntity.ok(Map.of("key", key, "value", value));
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("key", key);
+        body.put("path", outcome.path);
+        body.put("sstablesChecked", outcome.sstablesChecked);
+        body.put("sstablesReadFromDisk", outcome.sstablesReadFromDisk);
+
+        if (outcome.value == null) {
+            body.put("error", "not found");
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body);
+        }
+        body.put("value", new String(outcome.value, StandardCharsets.UTF_8));
+        return ResponseEntity.ok(body);
     }
 
     @DeleteMapping("/kv/{key}")
@@ -45,9 +63,15 @@ public class KvController {
 
     @GetMapping("/stats")
     public ResponseEntity<?> stats() {
+        long total = totalGets.get();
+        long noDisk = noDiskGets.get();
+        double pct = total == 0 ? 0.0 : (100.0 * noDisk / total);
         return ResponseEntity.ok(Map.of(
             "memtableSize", anvil.size(),
-            "sstableCount", anvil.sstableCount()
+            "sstableCount", anvil.sstableCount(),
+            "totalLookups", total,
+            "noDiskLookups", noDisk,
+            "noDiskPercent", Math.round(pct * 10.0) / 10.0
         ));
     }
 }

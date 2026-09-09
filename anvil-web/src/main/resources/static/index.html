@@ -4,42 +4,65 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>anvil — live demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="wrap">
-  <h1>anvil <span class="tag">live demo</span></h1>
-  <p class="sub">A real embedded key-value engine running on this server. Every button below hits actual WAL + MemTable + SSTable code — <a href="https://github.com/Parth160905/Anvil" target="_blank">full source on GitHub</a>.</p>
 
-  <div class="stats" id="stats">memtable: — · sstables: —</div>
+  <header class="hero">
+    <h1>anvil</h1>
+    <p class="lede">An embedded key-value engine, running for real on this server. Every request below hits actual write-ahead-log, memtable, and SSTable code &mdash; <a href="https://github.com/Parth160905/Anvil" target="_blank" rel="noopener">read the source</a>.</p>
 
-  <div class="card">
+    <div class="headline-stat">
+      <div class="stat-number" id="statNumber">&mdash;</div>
+      <div class="stat-label" id="statLabel">no lookups yet &mdash; try Get below</div>
+    </div>
+  </header>
+
+  <section class="panel">
     <h2>Put</h2>
+    <p class="panel-hint">Write a key and value into the engine.</p>
     <div class="row">
-      <input id="putKey" placeholder="key">
-      <input id="putValue" placeholder="value">
-      <button onclick="doPut()">PUT</button>
+      <input id="putKey" placeholder="key" autocomplete="off">
+      <input id="putValue" placeholder="value" autocomplete="off">
+      <button onclick="doPut()">Put</button>
     </div>
-  </div>
+  </section>
 
-  <div class="card">
+  <section class="panel">
     <h2>Get</h2>
+    <p class="panel-hint">Look up a key. Existing keys resolve from the memtable or an SSTable; unknown keys are usually rejected by a Bloom filter before any disk is touched.</p>
     <div class="row">
-      <input id="getKey" placeholder="key">
-      <button onclick="doGet()">GET</button>
+      <input id="getKey" placeholder="key" autocomplete="off">
+      <button onclick="doGet()">Get</button>
     </div>
-  </div>
+  </section>
 
-  <div class="card">
+  <section class="panel">
     <h2>Delete</h2>
+    <p class="panel-hint">Mark a key as deleted with a tombstone.</p>
     <div class="row">
-      <input id="delKey" placeholder="key">
-      <button onclick="doDelete()">DELETE</button>
+      <input id="delKey" placeholder="key" autocomplete="off">
+      <button onclick="doDelete()">Delete</button>
     </div>
-  </div>
+  </section>
 
-  <h2>Response</h2>
-  <pre id="output">Try a PUT first, then GET the same key to see it round-trip.</pre>
+  <section class="response-section">
+    <div class="response-head">
+      <h2>Response</h2>
+      <span class="outcome-tag" id="outcomeTag" hidden></span>
+    </div>
+    <pre id="output">Put a key, then get it back to see it round-trip.</pre>
+  </section>
+
+  <footer class="foot">
+    <span id="engineStats">memtable 0 keys, 0 SSTables on disk</span>
+    <a href="https://github.com/Parth160905/Anvil" target="_blank" rel="noopener">source</a>
+  </footer>
+
 </div>
 <script src="app.js"></script>
 </body>

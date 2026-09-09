@@ -76,7 +76,22 @@ public class Anvil implements AutoCloseable {
         maybeFlush();
     }
 
-    public byte[] get(String key) throws IOException {
+    /** Result of a get(), including WHY it resolved the way it did -- for the demo UI. */
+    public static final class GetOutcome {
+        public final byte[] value;
+        public final String path;
+        public final int sstablesChecked;
+        public final int sstablesReadFromDisk;
+
+        GetOutcome(byte[] value, String path, int sstablesChecked, int sstablesReadFromDisk) {
+            this.value = value;
+            this.path = path;
+            this.sstablesChecked = sstablesChecked;
+            this.sstablesReadFromDisk = sstablesReadFromDisk;
+        }
+    }
+
+    public GetOutcome getWithDiagnostics(String key) throws IOException {
         lock.readLock().lock();
         MemTable snapshot;
         List<SSTable> tablesSnapshot;
@@ -88,15 +103,32 @@ public class Anvil implements AutoCloseable {
         }
 
         byte[] fromMemtable = snapshot.get(key);
-        if (fromMemtable != null) return fromMemtable;
-        if (snapshot.isTombstone(key)) return null;
-
-        for (int i = tablesSnapshot.size() - 1; i >= 0; i--) {
-            byte[] result = tablesSnapshot.get(i).get(key);
-            if (result == SSTable.TOMBSTONE_MARKER) return null;
-            if (result != null) return result;
+        if (fromMemtable != null) {
+            return new GetOutcome(fromMemtable, "memtable", tablesSnapshot.size(), 0);
         }
-        return null;
+        if (snapshot.isTombstone(key)) {
+            return new GetOutcome(null, "memtable-tombstone", tablesSnapshot.size(), 0);
+        }
+
+        int diskReads = 0;
+        for (int i = tablesSnapshot.size() - 1; i >= 0; i--) {
+            SSTable.LookupResult result = tablesSnapshot.get(i).get(key);
+            if (result.touchedDisk) diskReads++;
+            if (result.value == SSTable.TOMBSTONE_MARKER) {
+                return new GetOutcome(null, diskReads == 0 ? "bloom-filtered" : "found-tombstone",
+                        tablesSnapshot.size(), diskReads);
+            }
+            if (result.value != null) {
+                return new GetOutcome(result.value, diskReads == 0 ? "bloom-filtered" : "found-on-disk",
+                        tablesSnapshot.size(), diskReads);
+            }
+        }
+        return new GetOutcome(null, diskReads == 0 ? "bloom-filtered" : "scanned-not-found",
+                tablesSnapshot.size(), diskReads);
+    }
+
+    public byte[] get(String key) throws IOException {
+        return getWithDiagnostics(key).value;
     }
 
     public String getAsString(String key) throws IOException {

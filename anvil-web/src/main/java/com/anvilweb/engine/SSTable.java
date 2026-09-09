@@ -57,15 +57,26 @@ public class SSTable {
         writeSidecarQuietly(sidecarFileFor(file), bloom, index);
     }
 
-    public byte[] get(String targetKey) throws IOException {
+    /** Result of a lookup: the value (or null/TOMBSTONE_MARKER), plus whether disk was actually touched. */
+    public static final class LookupResult {
+        public final byte[] value;
+        public final boolean touchedDisk;
+
+        LookupResult(byte[] value, boolean touchedDisk) {
+            this.value = value;
+            this.touchedDisk = touchedDisk;
+        }
+    }
+
+    public LookupResult get(String targetKey) throws IOException {
         if (bloomFilter != null && !bloomFilter.mightContain(targetKey)) {
-            return null;
+            return new LookupResult(null, false);
         }
 
         long startOffset = 0;
         if (sparseIndex != null) {
             startOffset = sparseIndex.startOffsetFor(targetKey);
-            if (startOffset < 0) return null;
+            if (startOffset < 0) return new LookupResult(null, false);
         }
 
         try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
@@ -75,7 +86,7 @@ public class SSTable {
                 try {
                     keyLen = raf.readInt();
                 } catch (EOFException eof) {
-                    return null;
+                    return new LookupResult(null, true);
                 }
                 byte[] keyBytes = new byte[keyLen];
                 raf.readFully(keyBytes);
@@ -84,13 +95,13 @@ public class SSTable {
 
                 int cmp = key.compareTo(targetKey);
                 if (cmp == 0) {
-                    if (isTombstone) return TOMBSTONE_MARKER;
+                    if (isTombstone) return new LookupResult(TOMBSTONE_MARKER, true);
                     int valLen = raf.readInt();
                     byte[] value = new byte[valLen];
                     raf.readFully(value);
-                    return value;
+                    return new LookupResult(value, true);
                 } else if (cmp > 0) {
-                    return null;
+                    return new LookupResult(null, true);
                 } else {
                     if (!isTombstone) {
                         int valLen = raf.readInt();
